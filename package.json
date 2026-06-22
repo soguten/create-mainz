@@ -1,6 +1,6 @@
 {
   "name": "create-mainz",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.2",
   "description": "Simple npm project creator for Mainz",
   "type": "module",
   "repository": {
@@ -8,6 +8,9 @@
     "url": "git+https://github.com/soguten/create-mainz.git"
   },
   "license": "MIT",
+  "dependencies": {
+    "@jsr/mainz__mainz": "0.1.0-alpha.56"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -18,16 +21,14 @@
     "node": ">=20.19.0"
   },
   "files": [
+    ".npmrc",
     "bin",
     "src",
-    "templates",
     "README.md"
   ],
   "scripts": {
     "smoke": "node ./bin/create-mainz.js --help",
-    "sync:templates": "node ./scripts/sync-templates.mjs",
     "test": "node --test",
-    "test:init": "node --test ./src/cli/main.test.js",
-    "test:templates": "node --test ./src/templates/materialize-template.test.js"
+    "test:init": "node --test ./src/cli/main.test.js"
   }
 }

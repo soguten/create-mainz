@@ -1,11 +1,16 @@
-import { access } from "node:fs/promises";
-import { basename, resolve } from "node:path";
-import process from "node:process";
+import { spawnSync } from "node:child_process";
 import {
-  instantiateTemplate,
-  materializeTemplatePlan,
-  resolveBuiltInTemplateRoot,
-} from "../templates/index.js";
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
 
 class CliUsageError extends Error {
   constructor(message) {
@@ -14,9 +19,18 @@ class CliUsageError extends Error {
   }
 }
 
-export async function main(args = process.argv.slice(2)) {
+const runtimePriority = ["node", "deno", "bun"];
+const nodeLocalMainzPackageDir = ".mainz-local/mainz";
+
+export async function main(args = process.argv.slice(2), hooks = {}) {
   try {
-    return await runCli(args);
+    return await runCli(args, {
+      cwd: hooks.cwd ?? process.cwd(),
+      detectInstalledRuntimes:
+        hooks.detectInstalledRuntimes ?? detectInstalledRuntimes,
+      loadBootstrapCli: hooks.loadBootstrapCli ?? loadBootstrapCli,
+      localMainzRepo: hooks.localMainzRepo ?? process.env.MAINZ_LOCAL_REPO,
+    });
   } catch (error) {
     if (error instanceof Error) {
       console.error(`[create-mainz] ${error.message}`);
@@ -28,7 +42,7 @@ export async function main(args = process.argv.slice(2)) {
   }
 }
 
-async function runCli(args) {
+async function runCli(args, hooks) {
   if (
     args.length === 0 ||
     args.includes("--help") ||
@@ -40,38 +54,32 @@ async function runCli(args) {
   }
 
   const options = parseInitOptions(args);
-  const outputDir = options.name
-    ? resolve(process.cwd(), options.name)
-    : process.cwd();
-  const runtime = options.runtime ?? "node";
-  const templateName = options.template ?? "empty";
-  const projectName = sanitizeProjectName(basename(outputDir) || "mainz-app");
-  const templateRoot = resolveBuiltInTemplateRoot(runtime, templateName);
-  const templateParams = buildTemplateParams({
-    runtime,
-    projectName,
-    mainzSpecifier: options.mainzSpecifier,
-  });
-  const plan = await instantiateTemplate({
-    templateRoot,
-    params: templateParams,
-  });
+  const installedRuntimes = await hooks.detectInstalledRuntimes();
+  const runtime = resolveRequestedRuntime(options.runtime, installedRuntimes);
+  const localMainzRepo = resolveLocalMainzRepo(hooks.localMainzRepo, hooks.cwd);
+  if (runtime === "bun") {
+    throw new CliUsageError(
+      'Runtime "bun" is not supported by the published Mainz bootstrap yet. Use "node" or "deno".',
+    );
+  }
 
-  validateTemplateCompatibility(plan.manifest, runtime, templateName);
-
-  await materializeTemplatePlan({
-    plan,
-    outputDir,
-    beforeWrite: assertCanCreateFile,
-  });
-
-  console.log(
-    `[create-mainz] Created Mainz ${templateName} project in ${outputDir}.`,
+  const bootstrapCli = await hooks.loadBootstrapCli(localMainzRepo);
+  const invocation = resolveBootstrapInvocation(options, runtime, hooks.cwd);
+  const exitCode = await runBootstrapCli(
+    bootstrapCli,
+    invocation.args,
+    invocation.cwd,
+    hooks.cwd,
   );
-  console.log(
-    `[create-mainz] Created ${plan.files.map((file) => file.path).join(", ")}.`,
-  );
-  return 0;
+  if (exitCode === 0 && localMainzRepo) {
+    rewireGeneratedProjectForLocalMainz(
+      resolveGeneratedProjectDir(options, invocation.cwd ?? hooks.cwd),
+      runtime,
+      localMainzRepo,
+    );
+  }
+
+  return exitCode;
 }
 
 function parseInitOptions(args) {
@@ -94,9 +102,9 @@ function parseInitOptions(args) {
 
     if (current === "--runtime") {
       const runtime = readOptionValue(current, args[index + 1]);
-      if (runtime !== "node" && runtime !== "deno") {
+      if (runtime !== "node" && runtime !== "deno" && runtime !== "bun") {
         throw new CliUsageError(
-          `Unsupported runtime "${runtime}". Use "node" or "deno".`,
+          `Unsupported runtime "${runtime}". Use "node", "deno", or "bun".`,
         );
       }
 
@@ -143,73 +151,290 @@ function readOptionValue(option, value) {
   return value;
 }
 
-function buildTemplateParams(options) {
-  if (options.runtime === "deno") {
-    const mainzSpecifier = options.mainzSpecifier ?? "jsr:@mainz/mainz";
+function buildBootstrapArgs(options, runtime, cwd) {
+  const args = ["init"];
+
+  if (options.name) {
+    args.push(options.name);
+  } else if (!cwd) {
+    throw new CliUsageError("Could not resolve the current working directory.");
+  }
+
+  if (options.template) {
+    args.push("--template", options.template);
+  }
+
+  args.push("--runtime", runtime);
+
+  if (options.mainzSpecifier) {
+    args.push("--mainz", options.mainzSpecifier);
+  }
+
+  return args;
+}
+
+function resolveBootstrapInvocation(options, runtime, cwd) {
+  if (!options.name || !isAbsolute(options.name)) {
     return {
-      projectName: options.projectName,
-      mainzSpecifier,
-      mainzSubpathPrefix: renderGeneratedMainzSubpathPrefix(mainzSpecifier),
-      mainzCliSpecifier: "jsr:@mainz/cli-deno",
-      denoConfigPath: "deno.json",
-      appName: "app",
-      appId: "app",
-      appNavigation: "enhanced-mpa",
-      appTitle: options.projectName,
-      rootDir: "./app",
-      outDir: "dist/app",
+      args: buildBootstrapArgs(options, runtime, cwd),
+      cwd,
     };
   }
 
   return {
-    projectName: options.projectName,
-    mainzSpecifier: options.mainzSpecifier ?? "latest",
-    appName: "app",
-    appId: "app",
-    appNavigation: "enhanced-mpa",
-    appTitle: options.projectName,
-    rootDir: "./app",
-    outDir: "dist/app",
+    args: buildBootstrapArgs(
+      { ...options, name: basename(options.name) },
+      runtime,
+      dirname(options.name),
+    ),
+    cwd: dirname(options.name),
   };
 }
 
-function renderGeneratedMainzSubpathPrefix(mainzSpecifier) {
-  const trimmed = mainzSpecifier.trim().replace(/\/+$/, "");
-  if (trimmed.startsWith("jsr:@")) {
-    return `jsr:/${trimmed.slice("jsr:".length)}/`;
+async function runBootstrapCli(bootstrapCli, args, bootstrapCwd, fallbackCwd) {
+  const previousCwd = process.cwd();
+  const nextCwd = bootstrapCwd ?? fallbackCwd;
+
+  if (nextCwd && nextCwd !== previousCwd) {
+    mkdirSync(nextCwd, { recursive: true });
+    process.chdir(nextCwd);
   }
 
-  return `${trimmed}/`;
-}
-
-function sanitizeProjectName(value) {
-  return value.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
-}
-
-function validateTemplateCompatibility(manifest, runtime, templateName) {
-  if (manifest.kind !== "project") {
-    throw new CliUsageError(`Template "${templateName}" is not a project template.`);
-  }
-
-  if (manifest.runtime !== runtime) {
-    throw new CliUsageError(
-      `Template "${templateName}" only supports runtime "${manifest.runtime}".`,
-    );
-  }
-}
-
-async function assertCanCreateFile(path) {
   try {
-    await access(path);
-    throw new CliUsageError(`Refusing to overwrite existing file "${path}".`);
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return;
+    return await bootstrapCli.main(args, { hostRuntime: "node" });
+  } finally {
+    if (process.cwd() !== previousCwd) {
+      process.chdir(previousCwd);
+    }
+  }
+}
+
+function resolveRequestedRuntime(requestedRuntime, installedRuntimes) {
+  if (requestedRuntime) {
+    if (!installedRuntimes.includes(requestedRuntime)) {
+      throw new CliUsageError(
+        `Runtime "${requestedRuntime}" is not installed on this machine.`,
+      );
     }
 
-    throw error;
+    return requestedRuntime;
+  }
+
+  const detectedRuntime = runtimePriority.find((runtime) =>
+    installedRuntimes.includes(runtime)
+  );
+  if (!detectedRuntime) {
+    throw new CliUsageError(
+      'Could not detect an installed runtime. Install "node", "deno", or "bun", or pass --runtime explicitly.',
+    );
+  }
+
+  return detectedRuntime;
+}
+
+async function detectInstalledRuntimes() {
+  return runtimePriority.filter((runtime) => isRuntimeInstalled(runtime));
+}
+
+function isRuntimeInstalled(runtime) {
+  if (runtime === "node") {
+    return true;
+  }
+
+  const result = spawnSync(runtime, ["--version"], {
+    stdio: "ignore",
+  });
+  return result.status === 0;
+}
+
+function resolveLocalMainzRepo(localMainzRepo, cwd) {
+  if (!localMainzRepo) {
+    return undefined;
+  }
+
+  return isAbsolute(localMainzRepo) ? localMainzRepo : resolve(cwd, localMainzRepo);
+}
+
+function resolveGeneratedProjectDir(options, cwd) {
+  if (!options.name) {
+    return cwd;
+  }
+
+  if (isAbsolute(options.name)) {
+    return options.name;
+  }
+
+  return resolve(cwd, options.name);
+}
+
+async function loadBootstrapCli(localMainzRepo) {
+  if (!localMainzRepo) {
+    return await import("@jsr/mainz__mainz/tooling/bootstrap-cli");
+  }
+
+  return {
+    async main(args) {
+      const result = spawnSync(resolveDenoCommand(), [
+        "run",
+        "-A",
+        "--config",
+        resolve(localMainzRepo, "jsr.json"),
+        resolve(localMainzRepo, "src", "public", "tooling-bootstrap-cli.ts"),
+        ...args,
+      ], {
+        stdio: "inherit",
+      });
+
+      if (result.error) {
+        throw result.error;
+      }
+
+      return result.status ?? 1;
+    },
+  };
+}
+
+function resolveDenoCommand() {
+  return "deno";
+}
+
+function rewireGeneratedProjectForLocalMainz(projectDir, runtime, localMainzRepo) {
+  if (runtime === "deno") {
+    rewireDenoProjectToLocalMainz(projectDir, localMainzRepo);
+    return;
+  }
+
+  rewireNodeProjectToLocalMainz(projectDir, localMainzRepo);
+}
+
+function rewireDenoProjectToLocalMainz(projectDir, localMainzRepo) {
+  const denoJsonPath = resolve(projectDir, "deno.json");
+  const denoConfig = JSON.parse(readFileSync(denoJsonPath, "utf8"));
+
+  denoConfig.imports = {
+    ...(denoConfig.imports ?? {}),
+    "@deno/loader": "npm:@jsr/deno__loader@^0.5.0",
+    "@std/jsonc": "npm:@jsr/std__jsonc@^1",
+    "happy-dom": "npm:happy-dom@20.9.0",
+    mainz: toFileSpecifier(resolve(localMainzRepo, "mod.ts")),
+    "mainz/config": toFileSpecifier(
+      resolve(localMainzRepo, "src", "public", "config.ts"),
+    ),
+    "mainz/jsx-runtime": toFileSpecifier(
+      resolve(localMainzRepo, "src", "jsx-runtime.ts"),
+    ),
+    "mainz/jsx-dev-runtime": toFileSpecifier(
+      resolve(localMainzRepo, "src", "jsx-dev-runtime.ts"),
+    ),
+  };
+  denoConfig.tasks = {
+    ...(denoConfig.tasks ?? {}),
+    mainz: `deno run -A --config deno.json ${
+      toFileSpecifier(resolve(localMainzRepo, "src", "public", "tooling-cli.ts"))
+    }`,
+  };
+
+  writeFileSync(denoJsonPath, `${JSON.stringify(denoConfig, null, 4)}\n`);
+}
+
+function rewireNodeProjectToLocalMainz(projectDir, localMainzRepo) {
+  const packageJsonPath = resolve(projectDir, "package.json");
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+  const localPackageDir = resolve(projectDir, nodeLocalMainzPackageDir);
+
+  packageJson.dependencies = {
+    ...(packageJson.dependencies ?? {}),
+    mainz: `file:${nodeLocalMainzPackageDir}`,
+  };
+  packageJson.devDependencies = {
+    ...(packageJson.devDependencies ?? {}),
+    "happy-dom": "20.9.0",
+    "tsx": "4.22.4",
+    "typescript": "5.9.3",
+  };
+  packageJson.scripts = {
+    ...(packageJson.scripts ?? {}),
+    mainz: "tsx ./scripts/mainz.mjs",
+  };
+
+  writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+
+  rmSync(localPackageDir, { recursive: true, force: true });
+  mkdirSync(localPackageDir, { recursive: true });
+  cpSync(resolve(localMainzRepo, "src"), resolve(localPackageDir, "src"), {
+    recursive: true,
+  });
+  copyFileSync(resolve(localMainzRepo, "mod.ts"), resolve(localPackageDir, "mod.ts"));
+  rewriteLocalNodeMainzPackageForNode(localPackageDir);
+  writeFileSync(
+    resolve(localPackageDir, "src", "compiler", "typescript.ts"),
+    'export { default as ts } from "typescript";\n',
+  );
+  writeFileSync(
+    resolve(localPackageDir, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "mainz",
+        private: true,
+        type: "module",
+        exports: {
+          ".": "./mod.ts",
+          "./config": "./src/public/config.ts",
+          "./jsx-runtime": "./src/jsx-runtime.ts",
+          "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts",
+          "./tooling/cli": "./src/public/tooling-cli.ts",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
+function rewriteLocalNodeMainzPackageForNode(localPackageDir) {
+  const nodeRuntimePath = resolve(localPackageDir, "src", "tooling", "runtime", "node.ts");
+  if (existsSync(nodeRuntimePath)) {
+    const nodeRuntime = readFileSync(nodeRuntimePath, "utf8").replace(
+      '"npm:tsx@4.22.4/esm/api"',
+      '"tsx/esm/api"',
+    );
+    writeFileSync(nodeRuntimePath, nodeRuntime);
   }
 }
+
+function toFileSpecifier(path) {
+  return pathToFileURL(path).href;
+}
+
+function ensureParentDir(path) {
+  const parent = dirname(path);
+  if (!existsSync(parent)) {
+    mkdirSync(parent, { recursive: true });
+  }
+}
+
+function writeTextFile(path, content) {
+  ensureParentDir(path);
+  writeFileSync(path, content);
+}
+
+function ensureLocalMainzFixture(repoDir) {
+  writeTextFile(resolve(repoDir, "jsr.json"), "{\n  \"version\": \"0.0.0-local\"\n}\n");
+  writeTextFile(resolve(repoDir, "mod.ts"), "export const mainz = true;\n");
+  writeTextFile(resolve(repoDir, "src", "public", "config.ts"), "export {};\n");
+  writeTextFile(resolve(repoDir, "src", "public", "tooling-cli.ts"), "export {};\n");
+  writeTextFile(resolve(repoDir, "src", "jsx-runtime.ts"), "export {};\n");
+  writeTextFile(resolve(repoDir, "src", "jsx-dev-runtime.ts"), "export {};\n");
+  writeTextFile(resolve(repoDir, "src", "compiler", "typescript.ts"), "export {};\n");
+  writeTextFile(
+    resolve(repoDir, "src", "tooling", "runtime", "node.ts"),
+    'import { register } from "npm:tsx@4.22.4/esm/api";\nexport { register };\n',
+  );
+}
+
+export const __testables = {
+  ensureLocalMainzFixture,
+};
 
 function printHelp() {
   console.log(
@@ -217,12 +442,20 @@ function printHelp() {
       "create-mainz",
       "",
       "Usage:",
-      "  create-mainz [<name>] [--template <empty|starter>] [--runtime <node|deno>] [--mainz <specifier>]",
+      "  create-mainz [<name>] [--template <empty|starter>] [--runtime <node|deno|bun>] [--mainz <specifier>]",
       "",
       "Options:",
       "  --template <empty|starter>  Choose the project template. Defaults to empty.",
-      "  --runtime <node|deno>       Choose which Mainz runtime template to generate.",
+      "  --runtime <node|deno|bun>   Choose which Mainz runtime to bootstrap.",
       "  --mainz <specifier>         Override the Mainz package specifier written to the project.",
+      "",
+      "Local development:",
+      "  Set MAINZ_LOCAL_REPO to a local Mainz repository checkout to rewire",
+      "  the generated project for local validation without publishing first.",
+      "",
+      "Runtime selection:",
+      "  Auto-detects installed runtimes in this order: node, deno, bun.",
+      "  When multiple runtimes are installed, node wins by default.",
       "",
       "Examples:",
       "  npm create mainz@latest my-app",

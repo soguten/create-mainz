@@ -1,6 +1,9 @@
 # create-mainz
 
-Simple unscoped npm package to create Mainz projects from the templates owned by
+Thin npm bootstrap wrapper for the published Mainz tooling package.
+
+`create-mainz` does not own template copies or scaffold logic. It delegates
+project creation to the published Mainz bootstrap CLI from
 [`soguten/mainz`](https://github.com/soguten/mainz).
 
 ## Usage
@@ -21,16 +24,28 @@ Deno runtime:
 npx create-mainz my-app --runtime deno
 ```
 
+Runtime selection:
+
+- explicit `--runtime` wins
+- otherwise installed runtimes are checked in this order: `node`, `deno`, `bun`
+- when multiple runtimes are installed, `node` is the default
+- `bun` detection exists, but Mainz bootstrap is not published for Bun yet
+
 ## Development
-
-Sync templates from the `main` branch of [`soguten/mainz`](https://github.com/soguten/mainz):
-
-```bash
-node ./scripts/sync-templates.mjs
-```
 
 Run tests:
 
 ```bash
 node --test
 ```
+
+Validate against a local `mainz` checkout without publishing first:
+
+```powershell
+$env:MAINZ_LOCAL_REPO='C:\Users\Alexandre\repos\mainz'
+npx create-mainz my-app --template starter
+```
+
+With `MAINZ_LOCAL_REPO` set, `create-mainz` rewires the generated project to
+consume the local repository instead of the published package. This path is
+intended for integration validation while `mainz` is still in flight.
