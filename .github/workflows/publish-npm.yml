@@ -13,6 +13,7 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
 
     steps:
       - name: Checkout
@@ -30,12 +31,32 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Print publish context
+        shell: bash
+        run: |
+          echo "event=${GITHUB_EVENT_NAME}"
+          echo "ref=${GITHUB_REF}"
+          echo "ref_name=${GITHUB_REF_NAME}"
+          echo "sha=${GITHUB_SHA}"
+          echo "package_version=$(node -p 'require(\"./package.json\").version')"
+
       - name: Verify release tag matches package version
         if: github.event_name == 'release'
         run: |
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
           if [ "v${PACKAGE_VERSION}" != "${GITHUB_REF_NAME}" ]; then
             echo "Release tag ${GITHUB_REF_NAME} does not match package.json version v${PACKAGE_VERSION}."
+            exit 1
+          fi
+
+      - name: Verify package version is not already published
+        shell: bash
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "Package ${PACKAGE_NAME}@${PACKAGE_VERSION} is already published on npm."
+            echo "Bump package.json version before publishing again."
             exit 1
           fi
 
