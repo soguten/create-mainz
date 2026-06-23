@@ -38,14 +38,3 @@ Run tests:
 ```bash
 node --test
 ```
-
-Validate against a local `mainz` checkout without publishing first:
-
-```powershell
-$env:MAINZ_LOCAL_REPO='C:\Users\Alexandre\repos\mainz'
-npx create-mainz my-app --template starter
-```
-
-With `MAINZ_LOCAL_REPO` set, `create-mainz` rewires the generated project to
-consume the local repository instead of the published package. This path is
-intended for integration validation while `mainz` is still in flight.
