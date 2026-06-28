@@ -1,6 +1,6 @@
 {
   "name": "create-mainz",
-  "version": "0.1.0-alpha.8",
+  "version": "0.1.0-alpha.9",
   "description": "Simple npm project creator for Mainz",
   "type": "module",
   "repository": {
@@ -9,7 +9,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@jsr/mainz__mainz": "https://npm.jsr.io/~/11/@jsr/mainz__mainz/0.1.0-alpha.61.tgz"
+    "@jsr/mainz__mainz": "https://npm.jsr.io/~/11/@jsr/mainz__mainz/0.1.0-alpha.62.tgz"
   },
   "publishConfig": {
     "access": "public"
