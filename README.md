@@ -1,84 +1,109 @@
 # create-mainz
 
-Thin npm bootstrap wrapper for the published Mainz tooling package.
+Create a new Mainz project.
 
-`create-mainz` does not own template copies or scaffold logic. It delegates
-project creation to the published Mainz bootstrap CLI from
-[`soguten/mainz`](https://github.com/soguten/mainz).
+## Requirements
 
-## Usage
+- Node.js `>= 20.19.0`
+- For Deno projects, `deno` must also be installed
 
-Stable release:
+## Quick start
+
+Create a new project with the default runtime:
 
 ```bash
 npm create mainz my-app
 ```
 
-```bash
-npx create-mainz my-app
-```
-
-Alpha release:
-
-```bash
-npm create mainz@alpha my-app
-```
-
-```bash
-npx create-mainz@alpha my-app
-```
-
-Starter template:
+Create a starter project:
 
 ```bash
 npm create mainz my-app -- --template starter
 ```
 
-```bash
-npx create-mainz my-app --runtime deno
-```
-
-Starter template using the alpha release:
-
-```bash
-npm create mainz@alpha my-app -- --template starter
-```
-
-```bash
-npx create-mainz@alpha my-app --template starter
-```
-
-Deno runtime:
+Create a Deno project:
 
 ```bash
 npm create mainz my-app -- --runtime deno
 ```
 
+Create a Deno starter project:
+
 ```bash
-npx create-mainz my-app --runtime deno
+npm create mainz my-app -- --runtime deno --template starter
 ```
 
-Deno runtime using the alpha release:
+Use the alpha release:
 
 ```bash
-npm create mainz@alpha my-app -- --runtime deno
+npm create mainz@alpha my-app
 ```
 
+## Options
+
+- `--runtime <node|deno|bun>`
+- `--template <empty|starter>`
+- `--mainz <specifier>`
+
+Examples:
+
 ```bash
-npx create-mainz@alpha my-app --runtime deno
+npm create mainz my-app -- --template starter
+npm create mainz my-app -- --runtime deno --template starter
+npm create mainz my-app -- --mainz jsr:@mainz/mainz@0.1.0-alpha.72
 ```
 
-Runtime selection:
+## Runtime selection
 
-- explicit `--runtime` wins
-- otherwise installed runtimes are checked in this order: `node`, `deno`, `bun`
-- when multiple runtimes are installed, `node` is the default
-- `bun` detection exists, but Mainz bootstrap is not published for Bun yet
+If you do not pass `--runtime`, `create-mainz` checks installed runtimes in this
+order:
 
-## Development
+1. `node`
+2. `deno`
+3. `bun`
 
-Run tests:
+When multiple runtimes are available, `node` is chosen by default.
+
+`bun` is detected, but Mainz project bootstrap is not published for Bun yet.
+
+## After scaffolding
+
+The generated project includes the Mainz tasks/scripts you need, but `dev`,
+`build`, `preview`, and `diagnose` still require an explicit target.
+
+Starter templates already include an `app` target:
+
+Node starter projects:
 
 ```bash
-node --test
+cd my-app
+npm install
+npm run dev -- --target app
+```
+
+Deno starter projects:
+
+```bash
+cd my-app
+deno task dev --target app
+```
+
+Empty templates start with no targets. Create one first, then pass it to the
+command:
+
+Node empty projects:
+
+```bash
+cd my-app
+npm install
+npm run mainz -- app create my-app
+npm run dev -- --target my-app
+```
+
+Deno empty projects:
+
+```bash
+cd my-app
+deno task mainz app create my-app
+deno task dev --target my-app
 ```

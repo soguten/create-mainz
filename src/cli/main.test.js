@@ -48,7 +48,7 @@ test("forwards template, runtime, and mainz overrides to the published bootstrap
     "--template",
     "starter",
     "--mainz",
-    "jsr:@mainz/mainz@0.1.0-alpha.71",
+    "jsr:@mainz/mainz@0.1.0-alpha.72",
   ], {
     async detectInstalledRuntimes() {
       return ["node", "deno"];
@@ -73,7 +73,7 @@ test("forwards template, runtime, and mainz overrides to the published bootstrap
       "--runtime",
       "deno",
       "--mainz",
-      "jsr:@mainz/mainz@0.1.0-alpha.71",
+      "jsr:@mainz/mainz@0.1.0-alpha.72",
     ],
     options: { hostRuntime: "node" },
   }]);
@@ -246,7 +246,7 @@ test("rewires node projects to a local Mainz repo when requested", async () => {
                     mainz: "node ./scripts/mainz.mjs",
                   },
                   dependencies: {
-                    mainz: "npm:@jsr/mainz__mainz@0.1.0-alpha.71",
+                    mainz: "npm:@jsr/mainz__mainz@0.1.0-alpha.72",
                   },
                   devDependencies: {
                     vite: "^8.0.16",
