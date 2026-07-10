@@ -50,7 +50,7 @@ Examples:
 ```bash
 npm create mainz my-app -- --template starter
 npm create mainz my-app -- --runtime deno --template starter
-npm create mainz my-app -- --mainz jsr:@mainz/mainz@0.1.0-alpha.76
+npm create mainz my-app -- --mainz jsr:@mainz/mainz@0.1.0-alpha.77
 ```
 
 ## Runtime selection
