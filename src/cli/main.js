@@ -71,12 +71,20 @@ async function runCli(args, hooks) {
     invocation.cwd,
     hooks.cwd,
   );
-  if (exitCode === 0 && localMainzRepo) {
-    rewireGeneratedProjectForLocalMainz(
-      resolveGeneratedProjectDir(options, invocation.cwd ?? hooks.cwd),
-      runtime,
-      localMainzRepo,
+  if (exitCode === 0) {
+    const projectDir = resolveGeneratedProjectDir(
+      options,
+      invocation.cwd ?? hooks.cwd,
     );
+    writeProjectAgentsGuide(projectDir, runtime);
+
+    if (localMainzRepo) {
+      rewireGeneratedProjectForLocalMainz(
+        projectDir,
+        runtime,
+        localMainzRepo,
+      );
+    }
   }
 
   return exitCode;
@@ -416,6 +424,77 @@ function ensureParentDir(path) {
 function writeTextFile(path, content) {
   ensureParentDir(path);
   writeFileSync(path, content);
+}
+
+function writeProjectAgentsGuide(projectDir, runtime) {
+  writeTextFile(resolve(projectDir, "AGENTS.md"), buildProjectAgentsGuide(runtime));
+}
+
+function buildProjectAgentsGuide(runtime) {
+  return [
+    "# AGENTS.md",
+    "",
+    "Guidance for contributors working in this Mainz application.",
+    "",
+    "## General",
+    "",
+    "- Use English for all code, UI copy, comments, docs, and commit messages.",
+    "- Keep the UI intentionally simple unless the task explicitly asks for richer design.",
+    "- Prefer predictable page flows over clever abstractions.",
+    "- Treat this project as a Mainz app first. Follow Mainz page, route, and app conventions before introducing custom runtime patterns.",
+    "",
+    "## Runtime",
+    "",
+    `- This project was scaffolded for the \`${runtime}\` runtime.`,
+    runtime === "node"
+      ? "- Use `npm run mainz -- ...` for Mainz CLI commands."
+      : "- Use `deno task mainz ...` for Mainz CLI commands.",
+    "- Run `mainz diagnose` before handing work off when routes, auth, or render modes changed.",
+    "",
+    "## App structure",
+    "",
+    "- Keep app composition in `app/src/app.ts`.",
+    "- Keep startup wiring in `app/src/main.tsx`.",
+    "- Put route-owning pages in `app/src/pages`.",
+    "- Put reusable view pieces in `app/src/components`.",
+    "- Put integration helpers, auth helpers, and runtime-facing utilities in `app/src/lib`.",
+    "",
+    "## Mainz routing",
+    "",
+    "- Every routed page should declare `@Route(...)`.",
+    "- Use `@RenderMode(\"ssg\")` for public, stable pages.",
+    "- Use `@RenderMode(\"ssr\")` for request-time HTML that depends on authenticated or request-scoped data.",
+    "- Leave a page undecorated only when `csr` is truly the right default.",
+    "- Keep navigation mode in `defineApp({ navigation })` and render mode on the page via decorators.",
+    "",
+    "## Mainz authorization",
+    "",
+    "- Put route protection on the owning page with `@Authorize()` or `@Authorize({ roles, policy })`.",
+    "- Use `@AllowAnonymous()` when a public page should stay explicitly public.",
+    "- Register runtime auth in `startApp(app, { auth: { ... } })`.",
+    "- Keep `auth.loginPath` aligned with the real login route.",
+    "- When a page uses named policies, also register `authorization.policyNames` in `defineApp(...)` so `mainz diagnose` can validate them.",
+    "",
+    "## Backend integration",
+    "",
+    "- Keep backend communication in small helpers under `app/src/lib`.",
+    "- Prefer one integration helper per backend concern, for example auth, CMS data, or account/session state.",
+    "- Do not spread backend URLs and storage keys across pages and components.",
+    "- For authenticated SSR routes, make sure the chosen auth mechanism is visible to the server runtime, not only to browser-local storage.",
+    "",
+    "## UI guidance",
+    "",
+    "- Start with semantic HTML and simple page copy.",
+    "- Use forms, links, headings, and sections before introducing custom styling or client state.",
+    "- Add stateful components only when the flow truly needs browser interaction.",
+    "",
+    "## Before finishing",
+    "",
+    "- Run the local diagnose command for the app target.",
+    "- If build output changed, also run the local build command when practical.",
+    "- Mention any runtime limitation clearly, especially around SSR, auth, or local-only assumptions.",
+    "",
+  ].join("\n");
 }
 
 function ensureLocalMainzFixture(repoDir) {
